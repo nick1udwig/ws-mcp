@@ -1,6 +1,6 @@
 [project]
 name = "ws-mcp"
-version = "0.1.0"
+version = "0.1.1"
 description = "Wrap MCP servers with a WebSocket."
 readme = "README.md"
 authors = [{ name = "nick1udwig", email = "hosted-fornet@protonmail.com" }]
@@ -9,6 +9,9 @@ dependencies = [
     "jsonschema>=4.23.0",
     "websockets>=14.1",
 ]
+
+[project.urls]
+GitHub = "https://github.com/nick1udwig/ws-mcp"
 
 [project.scripts]
 ws-mcp = "ws_mcp:main"
