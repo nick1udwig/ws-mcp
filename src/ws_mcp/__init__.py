@@ -1,14 +1,17 @@
+import argparse
 import asyncio
 import json
 import logging
-import sys
 import shlex
-import argparse
+import sys
+
+import jsonschema
+import websockets
+
 from asyncio import create_subprocess_exec, subprocess
 from typing import Optional, Dict, Any
-import websockets
+
 from websockets.legacy.server import WebSocketServerProtocol
-import jsonschema
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -265,7 +268,7 @@ Examples:
 
     return parser.parse_args()
 
-async def main():
+async def execute():
     args = parse_args()
 
     # Set log level from arguments
@@ -274,5 +277,8 @@ async def main():
     bridge = McpWebSocketBridge(args.command, args.port)
     await bridge.serve()
 
+def main():
+    asyncio.run(execute())
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
