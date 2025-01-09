@@ -3,6 +3,10 @@
 Wrap MCP stdio servers with a WebSocket.
 For use with [llm-chat](https://github.com/nick1udwig/llm-chat).
 
+## Prerequisites
+
+* uv
+
 ## Usage
 
 ```
