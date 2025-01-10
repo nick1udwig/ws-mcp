@@ -245,7 +245,7 @@ def parse_dotenv(env_file: Path) -> Dict[str, str]:
     """Parse a .env file and return a dictionary of environment variables."""
     if not env_file.exists():
         raise FileNotFoundError(f"Environment file not found: {env_file}")
-    
+
     env_vars = {}
     with env_file.open() as f:
         for line in f:
@@ -271,8 +271,7 @@ def parse_args():
 Examples:
   %(prog)s --command "uv tool run --from wcgw@latest --python 3.12 wcgw_mcp" --port 3000
   %(prog)s --command "node path/to/mcp-server.js" --port 3001 --env API_KEY=xyz123
-  %(prog)s --command "./server" --env-file .env
-        """
+  %(prog)s --command "./server" --env-file .env"""
     )
 
     parser.add_argument(
@@ -300,7 +299,7 @@ Examples:
         '--env',
         type=str,
         action='append',
-        help='Environment variables to pass to the MCP server in KEY=VALUE format. Can be specified multiple times.'
+        help='Environment variables to pass to the MCP server in KEY=VALUE format. Can be specified multiple times. Overrides .env.'
     )
 
     parser.add_argument(
