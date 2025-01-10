@@ -8,6 +8,7 @@ import sys
 
 import jsonschema
 import websockets
+from pathlib import Path
 
 from asyncio import create_subprocess_exec, subprocess
 from typing import Optional, Dict, Any
@@ -240,6 +241,28 @@ class McpWebSocketBridge:
         finally:
             await self.cleanup()
 
+def parse_dotenv(env_file: Path) -> Dict[str, str]:
+    """Parse a .env file and return a dictionary of environment variables."""
+    if not env_file.exists():
+        raise FileNotFoundError(f"Environment file not found: {env_file}")
+    
+    env_vars = {}
+    with env_file.open() as f:
+        for line in f:
+            line = line.strip()
+            # Skip empty lines and comments
+            if not line or line.startswith('#'):
+                continue
+            try:
+                key, value = line.split('=', 1)
+                # Remove quotes if present
+                key = key.strip()
+                value = value.strip().strip("'").strip('"')
+                env_vars[key] = value
+            except ValueError:
+                logger.warning(f"Skipping invalid line in .env file: {line}")
+    return env_vars
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description='Bridge a stdio-based MCP server to WebSocket',
@@ -247,7 +270,8 @@ def parse_args():
         epilog="""
 Examples:
   %(prog)s --command "uv tool run --from wcgw@latest --python 3.12 wcgw_mcp" --port 3000
-  %(prog)s --command "node path/to/mcp-server.js" --port 3001
+  %(prog)s --command "node path/to/mcp-server.js" --port 3001 --env API_KEY=xyz123
+  %(prog)s --command "./server" --env-file .env
         """
     )
 
@@ -279,6 +303,12 @@ Examples:
         help='Environment variables to pass to the MCP server in KEY=VALUE format. Can be specified multiple times.'
     )
 
+    parser.add_argument(
+        '--env-file',
+        type=Path,
+        help='Path to a .env file containing environment variables'
+    )
+
     return parser.parse_args()
 
 async def execute():
@@ -287,8 +317,18 @@ async def execute():
     # Set log level from arguments
     logging.getLogger().setLevel(args.log_level)
 
-    # Parse environment variables if provided
+    # Initialize environment variables dictionary
     env = {}
+
+    # Read environment variables from .env file if provided
+    if args.env_file:
+        try:
+            env.update(parse_dotenv(args.env_file))
+        except Exception as e:
+            logger.error(f"Error reading .env file: {e}")
+            sys.exit(1)
+
+    # Add/override with command line environment variables if provided
     if args.env:
         for env_var in args.env:
             try:
