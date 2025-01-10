@@ -59,7 +59,7 @@ class McpWebSocketBridge:
 
         # Merge current environment with provided environment variables
         process_env = {**os.environ, **self.env}
-        
+
         self.process = await create_subprocess_exec(
             *args,
             stdin=subprocess.PIPE,
