@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import shlex
 import sys
 
@@ -43,9 +44,10 @@ INITIALIZE_REQUEST_SCHEMA = {
 }
 
 class McpWebSocketBridge:
-    def __init__(self, command: str, port: int = 3000):
+    def __init__(self, command: str, port: int = 3000, env: Optional[Dict[str, str]] = None):
         self.command = command
         self.port = port
+        self.env = env or {}
         self.process: Optional[subprocess.Process] = None
         self.websocket: Optional[WebSocketServerProtocol] = None
         self.pending_requests: Dict[str, asyncio.Future] = {}
@@ -55,11 +57,15 @@ class McpWebSocketBridge:
         """Start the stdio MCP server process"""
         args = shlex.split(self.command)
 
+        # Merge current environment with provided environment variables
+        process_env = {**os.environ, **self.env}
+        
         self.process = await create_subprocess_exec(
             *args,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
+            stderr=subprocess.PIPE,
+            env=process_env
         )
 
         if not self.process.stdin or not self.process.stdout:
@@ -266,6 +272,13 @@ Examples:
         help='Set the logging level (default: INFO)'
     )
 
+    parser.add_argument(
+        '--env',
+        type=str,
+        action='append',
+        help='Environment variables to pass to the MCP server in KEY=VALUE format. Can be specified multiple times.'
+    )
+
     return parser.parse_args()
 
 async def execute():
@@ -274,7 +287,18 @@ async def execute():
     # Set log level from arguments
     logging.getLogger().setLevel(args.log_level)
 
-    bridge = McpWebSocketBridge(args.command, args.port)
+    # Parse environment variables if provided
+    env = {}
+    if args.env:
+        for env_var in args.env:
+            try:
+                key, value = env_var.split('=', 1)
+                env[key] = value
+            except ValueError:
+                logger.error(f"Invalid environment variable format: {env_var}. Must be KEY=VALUE")
+                sys.exit(1)
+
+    bridge = McpWebSocketBridge(args.command, args.port, env)
     await bridge.serve()
 
 def main():
