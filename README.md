@@ -25,4 +25,11 @@ git submodule update --init --recursive
 git checkout hf/fix-wcgw-on-ubuntu
 cd ..
 uvx ws-mcp --command "uvx --from /tmp/wcgw --with /tmp/wcgw/src/mcp_wcgw --python 3.12 wcgw_mcp" --port 3001
+
+# Example using Brave search
+export BRAVE_API_KEY=YOUR_API_KEY_HERE
+uvx ws-mcp --env BRAVE_API_KEY=$BRAVE_API_KEY --command "npx -y @modelcontextprotocol/server-brave-search" --port 3003
+
+# Or, with a .env file:
+uvx ws-mcp --env-file path/to/.env --command "npx -y @modelcontextprotocol/server-brave-search" --port 3003
 ```
