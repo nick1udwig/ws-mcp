@@ -1,7 +1,7 @@
 # ws-mcp
 
 Wrap MCP stdio servers with a WebSocket.
-For use with [llm-chat](https://github.com/nick1udwig/llm-chat).
+For use with [kibitz](https://github.com/nick1udwig/kibitz).
 
 ## Prerequisites
 
