@@ -441,6 +441,44 @@ def parse_dotenv(env_file: Path) -> Dict[str, str]:
                 logger.warning(f"Skipping invalid line in .env file: {line}")
     return env_vars
 
+def parse_config_file(config_path: Path) -> List[str]:
+    """Parse the MCP server configuration file.
+
+    Args:
+        config_path: Path to the JSON configuration file.
+
+    Returns:
+        List of command strings extracted from the configuration.
+
+    Raises:
+        ValueError: If the configuration file is invalid.
+        FileNotFoundError: If the configuration file doesn't exist.
+        json.JSONDecodeError: If the configuration file contains invalid JSON.
+    """
+    if not config_path.exists():
+        raise FileNotFoundError(f"Configuration file not found: {config_path}")
+
+    with config_path.open() as f:
+        config = json.load(f)
+
+    if not isinstance(config, dict) or "mcpServers" not in config:
+        raise ValueError("Configuration must have 'mcpServers' object")
+
+    commands = []
+    for server_name, server_config in config["mcpServers"].items():
+        if not isinstance(server_config, dict) or "command" not in server_config:
+            raise ValueError(f"Server '{server_name}' must have 'command' field")
+
+        cmd = [server_config["command"]]
+        if "args" in server_config:
+            if not isinstance(server_config["args"], list):
+                raise ValueError(f"Server '{server_name}' args must be a list")
+            cmd.extend(server_config["args"])
+
+        commands.append(shlex.join(cmd))
+
+    return commands
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description='Bridge multiple stdio-based MCP servers to WebSocket',
@@ -449,15 +487,22 @@ def parse_args():
 Examples:
   %(prog)s --command "uv tool run --from wcgw@latest --python 3.12 wcgw_mcp" --command "node path/to/mcp-server.js" --port 3000
   %(prog)s --command "./server1" --command "./server2" --port 3001 --env API_KEY=xyz123
-  %(prog)s --command "./server1" --command "./server2" --env-file .env"""
+  %(prog)s --command "./server1" --command "./server2" --env-file .env
+  %(prog)s --config config.json --port 3000"""
     )
 
-    parser.add_argument(
+    command_group = parser.add_mutually_exclusive_group(required=True)
+    command_group.add_argument(
         '--command',
         type=str,
-        required=True,
         action='append',
         help='Command to start an MCP server (in quotes). Can be specified multiple times.'
+    )
+
+    command_group.add_argument(
+        '--config',
+        type=Path,
+        help='Path to a JSON configuration file containing MCP server configurations'
     )
 
     parser.add_argument(
@@ -516,8 +561,15 @@ async def execute():
                 logger.error(f"Invalid environment variable format: {env_var}. Must be KEY=VALUE")
                 sys.exit(1)
 
+    # Get commands from either direct arguments or config file
+    try:
+        commands = args.command if args.command else parse_config_file(args.config)
+    except (FileNotFoundError, ValueError, json.JSONDecodeError) as e:
+        logger.error(f"Error reading configuration file: {e}")
+        sys.exit(1)
+
     # Initialize bridge with multiple commands
-    bridge = McpWebSocketBridge(args.command, args.port, env)
+    bridge = McpWebSocketBridge(commands, args.port, env)
     await bridge.serve()
 
 def main():
