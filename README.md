@@ -5,11 +5,11 @@ For use with [kibitz](https://github.com/nick1udwig/kibitz).
 
 ## Prerequisites
 
-* uv
+* [uv](https://github.com/astral-sh/uv)
 
 ## Usage
 
-```
+```bash
 # Example using fetch
 uvx ws-mcp --command "uvx mcp-server-fetch" --port 3002
 
@@ -36,4 +36,38 @@ uvx ws-mcp --env-file path/to/.env --command "npx -y @modelcontextprotocol/serve
 # `--command` can be supplied multiple times!
 #  Example serving multiple servers at once:
 uvx ws-mcp --env-file path/to/.env --command "npx -y @modelcontextprotocol/server-brave-search" --command "uvx mcp-server-fetch" --port 3004
+
+# Servers can also be specified in a `.json` file following [the standard MCP format](https://modelcontextprotocol.io/quickstart/user#2-add-the-filesystem-mcp-server)
+uvx ws-mcp --env-file path/to/.env --config path/to/config.json --port 3005
+```
+
+### Example MCP configuration file
+
+```json
+{
+  "mcpServers": {
+    "wcgw": {
+      "command": "uvx",
+      "args": [
+        "wcgw@latest",
+        "--python",
+        "3.12",
+        "wcgw_mcp"
+      ]
+    },
+    "fetch": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-fetch"
+      ]
+    },
+    "brave-search": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-brave-search"
+      ]
+    }
+  }
+}
 ```
