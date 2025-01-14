@@ -11,7 +11,7 @@ import websockets
 from pathlib import Path
 
 from asyncio import create_subprocess_exec, subprocess, Queue
-from typing import Optional, Dict, List, Any, Union
+from typing import Optional, Dict, List, Any, Union, Tuple
 
 from websockets.legacy.server import WebSocketServerProtocol
 
@@ -28,13 +28,13 @@ class MessagePublisher:
     def set_websocket(self, websocket: WebSocketServerProtocol):
         """Set the WebSocket connection to publish messages to."""
         self.websocket = websocket
-        
+
     async def start(self):
         """Start the message publishing task."""
         if self._task is None:
             self.running = True
             self._task = asyncio.create_task(self._publish_messages())
-            
+
     async def stop(self):
         """Stop the message publishing task."""
         self.running = False
@@ -42,11 +42,11 @@ class MessagePublisher:
             await self.message_queue.put(None)  # Sentinel to stop the loop
             await self._task
             self._task = None
-            
+
     async def publish(self, message: Dict[str, Any]):
         """Queue a message for publishing."""
         await self.message_queue.put(message)
-        
+
     async def _publish_messages(self):
         """Main loop for publishing messages to WebSocket."""
         while self.running:
@@ -54,10 +54,10 @@ class MessagePublisher:
                 message = await self.message_queue.get()
                 if message is None:  # Stop sentinel
                     break
-                    
+
                 if self.websocket and self.websocket.state == websockets.protocol.State.OPEN:
                     await self.websocket.send(json.dumps(message))
-                    
+
             except Exception as e:
                 logger.error(f"Error publishing message: {e}")
                 continue
@@ -97,7 +97,7 @@ class McpServer:
         self.command = command
         self.env = env or {}
         self.process: Optional[subprocess.Process] = None
-        self.pending_requests: Dict[str, asyncio.Future] = {}
+        self.pending_requests: Dict[str, Tuple[asyncio.Future, bool]] = {}
         self.tools: Dict[str, Any] = {}  # Map of tool names to their schemas
         self.initialized = False
         self.message_publisher: Optional[MessagePublisher] = None
@@ -126,14 +126,14 @@ class McpServer:
         self.tools = tools
         self.initialized = True
 
-    async def send_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def send_request(self, request: Dict[str, Any], should_send_over_ws: bool) -> Dict[str, Any]:
         """Send a request to this server and wait for response"""
         if not self.process or not self.process.stdin:
             raise RuntimeError("Process not started or stdin not available")
 
         request_id = request.get("id")
         if request_id:
-            self.pending_requests[request_id] = asyncio.Future()
+            self.pending_requests[request_id] = asyncio.Future(), should_send_over_ws
 
         message_bytes = f"{json.dumps(request)}\n".encode()
         self.process.stdin.write(message_bytes)
@@ -143,7 +143,7 @@ class McpServer:
         if request_id:
             try:
                 response = await asyncio.wait_for(
-                    self.pending_requests[request_id],
+                    self.pending_requests[request_id][0],
                     timeout=10.0
                 )
                 return response
@@ -187,10 +187,10 @@ class McpServer:
                 try:
                     message = json.loads(line_str)
                     if "id" in message and message["id"] in self.pending_requests:
-                        future = self.pending_requests.pop(message["id"])
+                        future, should_send_over_ws = self.pending_requests.pop(message["id"])
                         future.set_result(message)
 
-                    if self.message_publisher:
+                    if self.message_publisher and should_send_over_ws:
                         await self.message_publisher.publish(message)
                 except json.JSONDecodeError as e:
                     logger.error(f"Failed to parse JSON from {self.command}: {line_str}")
@@ -249,21 +249,23 @@ class McpWebSocketBridge:
         return self.tool_to_server.get(method)
 
     def get_combined_tools(self):
-        combined_tools = {}
+        combined_tools = []
         for server in self.servers:
-            combined_tools.update(server.tools)
-        combined_tools
+            logger.info(f"{server.tools}")
+            combined_tools.extend(server.tools)
+        logger.info(f"get_combined_tools: combined: {combined_tools}")
+        return combined_tools
 
     async def handle_initialize(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Handle initialize request by forwarding to all servers and combining responses"""
         # Send initialize to all servers and collect their tools
         for server in self.servers:
-            response = await server.send_request(request)
+            response = await server.send_request(request, False)
             logger.info(f"handle_initialize: initialize {server.command} - {response}")
 
-            time.sleep(2)
+            await server.send_request({"jsonrpc":"2.0","method":"notifications/initialized"}, False)
 
-            response = await server.send_request({"jsonrpc":"2.0","method":"tools/list","id":2})
+            response = await server.send_request({"jsonrpc":"2.0","method":"tools/list","id":2}, False)
             logger.info(f"handle_initialize: tools/list {server.command} - {response}")
 
             if "result" in response and "tools" in response["result"]:
@@ -276,15 +278,6 @@ class McpWebSocketBridge:
 
         # Return combined response
         logger.info(f"handle_initialize: done with {self.tool_to_server}")
-        #return {
-        #    "jsonrpc": "2.0",
-        #    "id": request["id"],
-        #    "result": {
-        #        "name": "ws-mcp-multi",
-        #        "version": "1.0.0",
-        #        "tools": combined_tools
-        #    }
-        #}
         # TODO
         return {
             "jsonrpc": "2.0",
@@ -301,38 +294,15 @@ class McpWebSocketBridge:
             }
         }
 
-
-    #async def handle_stderr(self):
-    #    """Handle stderr output from all processes"""
-    #    stderr_tasks = []
-    #    for server in self.servers:
-    #        async def handle_server_stderr(server: McpServer):
-    #            while True:
-    #                if not server.process or not server.process.stderr:
-    #                    break
-    #                try:
-    #                    line = await server.process.stderr.readline()
-    #                    if not line:
-    #                        break
-    #                    logger.info(f"Process stderr ({server.command}): {line.decode().strip()}")
-    #                except Exception as e:
-    #                    logger.error(f"Error handling stderr for {server.command}: {e}")
-    #                    break
-
-    #        stderr_tasks.append(asyncio.create_task(handle_server_stderr(server)))
-
-    #    await asyncio.gather(*stderr_tasks)
-
-
     async def handle_client(self, websocket: WebSocketServerProtocol):
         """Handle WebSocket client connection"""
         self.websocket = websocket
         self.message_publisher.set_websocket(websocket)
-        
+
         # Set message publisher for all servers
         for server in self.servers:
             server.set_message_publisher(self.message_publisher)
-            
+
         logger.info("WebSocket client connected")
 
         try:
@@ -349,6 +319,7 @@ class McpWebSocketBridge:
                             jsonschema.validate(instance=data, schema=INITIALIZE_REQUEST_SCHEMA)
                             response = await self.handle_initialize(data)
                             await websocket.send(json.dumps(response))
+                            logger.info("done")
                             continue
                         except jsonschema.exceptions.ValidationError as e:
                             error_response = {
@@ -367,11 +338,12 @@ class McpWebSocketBridge:
                         await websocket.send(json.dumps(tools))
                         continue
                     elif method == "notifications/initialized":
+                        # handled in handle_initialize
                         continue
 
                     # Route other requests to appropriate server
-                    server = self.get_server_for_tool(method)
-                    if not server:
+                    s = self.get_server_for_tool(method)
+                    if not s:
                         error_response = {
                             "jsonrpc": "2.0",
                             "id": data.get("id"),
@@ -383,7 +355,7 @@ class McpWebSocketBridge:
                         await websocket.send(json.dumps(error_response))
                         continue
 
-                    response = await server.send_request(data)
+                    response = await s.send_request(data, True)
                     if response:
                         await websocket.send(json.dumps(response))
 

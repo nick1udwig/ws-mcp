@@ -32,4 +32,8 @@ uvx ws-mcp --env BRAVE_API_KEY=$BRAVE_API_KEY --command "npx -y @modelcontextpro
 
 # Or, with a .env file:
 uvx ws-mcp --env-file path/to/.env --command "npx -y @modelcontextprotocol/server-brave-search" --port 3003
+
+# `--command` can be supplied multiple times!
+#  Example serving multiple servers at once:
+uvx ws-mcp --env-file path/to/.env --command "npx -y @modelcontextprotocol/server-brave-search" --command "uvx mcp-server-fetch" --port 3004
 ```
