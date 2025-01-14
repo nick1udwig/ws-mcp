@@ -17,6 +17,9 @@ from websockets.legacy.server import WebSocketServerProtocol
 
 import time
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 class MessagePublisher:
     """Handles publishing messages to WebSocket clients."""
     def __init__(self):
@@ -61,9 +64,6 @@ class MessagePublisher:
             except Exception as e:
                 logger.error(f"Error publishing message: {e}")
                 continue
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 INITIALIZE_REQUEST_SCHEMA = {
     "type": "object",
@@ -138,7 +138,7 @@ class McpServer:
         message_bytes = f"{json.dumps(request)}\n".encode()
         self.process.stdin.write(message_bytes)
         await self.process.stdin.drain()
-        logger.info(f"Sent to {self.command}: {request}")
+        logger.debug(f"Sent to {self.command}: {request}")
 
         if request_id:
             try:
@@ -174,7 +174,7 @@ class McpServer:
             try:
                 line = await self.process.stdout.readline()
                 if not line:
-                    logger.info(f"Process stdout closed for command: {self.command}")
+                    logger.error(f"Process stdout closed for command: {self.command}")
                     break
 
                 line_str = line.decode().strip()
@@ -182,7 +182,7 @@ class McpServer:
                     logger.info(f"handle_stdout {self.command} got no-decode-able line")
                     continue
 
-                logger.info(f"handle_stdout {self.command} got line {line_str}")
+                logger.debug(f"handle_stdout {self.command} got line {line_str}")
 
                 try:
                     message = json.loads(line_str)
@@ -210,7 +210,7 @@ class McpServer:
                 line = await self.process.stderr.readline()
                 if not line:
                     break
-                logger.info(f"Process stderr ({self.command}): {line.decode().strip()}")
+                logger.debug(f"Process stderr ({self.command}): {line.decode().strip()}")
             except Exception as e:
                 logger.error(f"Error handling stderr ({self.command}): {e}")
                 break
@@ -251,9 +251,9 @@ class McpWebSocketBridge:
     def get_combined_tools(self):
         combined_tools = []
         for server in self.servers:
-            logger.info(f"{server.tools}")
+            logger.debug(f"{server.tools}")
             combined_tools.extend(server.tools)
-        logger.info(f"get_combined_tools: combined: {combined_tools}")
+        logger.debug(f"get_combined_tools: combined: {combined_tools}")
         return combined_tools
 
     async def handle_initialize(self, request: Dict[str, Any]) -> Dict[str, Any]:
@@ -261,12 +261,12 @@ class McpWebSocketBridge:
         # Send initialize to all servers and collect their tools
         for server in self.servers:
             response = await server.send_request(request, False)
-            logger.info(f"handle_initialize: initialize {server.command} - {response}")
+            logger.debug(f"handle_initialize: initialize {server.command} - {response}")
 
             await server.send_request({"jsonrpc":"2.0","method":"notifications/initialized"}, False)
 
             response = await server.send_request({"jsonrpc":"2.0","method":"tools/list","id":2}, False)
-            logger.info(f"handle_initialize: tools/list {server.command} - {response}")
+            logger.debug(f"handle_initialize: tools/list {server.command} - {response}")
 
             if "result" in response and "tools" in response["result"]:
                 server_tools = response["result"]["tools"]
@@ -277,7 +277,7 @@ class McpWebSocketBridge:
                     self.tool_to_server[tool["name"]] = server
 
         # Return combined response
-        logger.info(f"handle_initialize: done with {self.tool_to_server}")
+        logger.debug(f"handle_initialize: done with {self.tool_to_server}")
         # TODO
         return {
             "jsonrpc": "2.0",
@@ -319,7 +319,7 @@ class McpWebSocketBridge:
                             jsonschema.validate(instance=data, schema=INITIALIZE_REQUEST_SCHEMA)
                             response = await self.handle_initialize(data)
                             await websocket.send(json.dumps(response))
-                            logger.info("done")
+                            logger.debug("done")
                             continue
                         except jsonschema.exceptions.ValidationError as e:
                             error_response = {
@@ -334,7 +334,7 @@ class McpWebSocketBridge:
                             continue
                     elif method == "tools/list":
                         tools = await self.list_tools(data.get("id"))
-                        logger.info(f"tools/list: {tools}")
+                        logger.debug(f"tools/list: {tools}")
                         await websocket.send(json.dumps(tools))
                         continue
                     elif method == "notifications/initialized":
