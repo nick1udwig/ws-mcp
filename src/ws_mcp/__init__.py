@@ -441,6 +441,39 @@ def parse_dotenv(env_file: Path) -> Dict[str, str]:
                 logger.warning(f"Skipping invalid line in .env file: {line}")
     return env_vars
 
+# Schema for MCP server configuration file
+MCP_CONFIG_SCHEMA = {
+    "type": "object",
+    "required": ["mcpServers"],
+    "properties": {
+        "mcpServers": {
+            "type": "object",
+            "minProperties": 1,
+            "patternProperties": {
+                "^[a-zA-Z0-9_-]+$": {  # Server name pattern
+                    "type": "object",
+                    "required": ["command"],
+                    "properties": {
+                        "command": {
+                            "type": "string",
+                            "minLength": 1
+                        },
+                        "args": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "additionalProperties": False
+                }
+            },
+            "additionalProperties": False
+        }
+    },
+    "additionalProperties": False
+}
+
 def parse_config_file(config_path: Path) -> List[str]:
     """Parse the MCP server configuration file.
 
@@ -454,6 +487,7 @@ def parse_config_file(config_path: Path) -> List[str]:
         ValueError: If the configuration file is invalid.
         FileNotFoundError: If the configuration file doesn't exist.
         json.JSONDecodeError: If the configuration file contains invalid JSON.
+        jsonschema.exceptions.ValidationError: If the configuration doesn't match the schema.
     """
     if not config_path.exists():
         raise FileNotFoundError(f"Configuration file not found: {config_path}")
@@ -461,20 +495,14 @@ def parse_config_file(config_path: Path) -> List[str]:
     with config_path.open() as f:
         config = json.load(f)
 
-    if not isinstance(config, dict) or "mcpServers" not in config:
-        raise ValueError("Configuration must have 'mcpServers' object")
+    # Validate configuration against schema
+    jsonschema.validate(instance=config, schema=MCP_CONFIG_SCHEMA)
 
     commands = []
     for server_name, server_config in config["mcpServers"].items():
-        if not isinstance(server_config, dict) or "command" not in server_config:
-            raise ValueError(f"Server '{server_name}' must have 'command' field")
-
         cmd = [server_config["command"]]
         if "args" in server_config:
-            if not isinstance(server_config["args"], list):
-                raise ValueError(f"Server '{server_name}' args must be a list")
             cmd.extend(server_config["args"])
-
         commands.append(shlex.join(cmd))
 
     return commands
@@ -564,7 +592,7 @@ async def execute():
     # Get commands from either direct arguments or config file
     try:
         commands = args.command if args.command else parse_config_file(args.config)
-    except (FileNotFoundError, ValueError, json.JSONDecodeError) as e:
+    except (FileNotFoundError, json.JSONDecodeError, jsonschema.exceptions.ValidationError) as e:
         logger.error(f"Error reading configuration file: {e}")
         sys.exit(1)
 
