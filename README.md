@@ -30,16 +30,16 @@ To make a configuration file:
 
 ### Running ws-mcp
 
-Basic usage with default config file (no `--config` or `--command` provided):
+Basic usage with default config file (no `--config` or `--command` provided) and port:
 ```bash
-uvx --refresh ws-mcp@latest --port 3001
+uvx --refresh ws-mcp@latest
 ```
 
-This will start all configured servers on the specified port.
+This will start all configured servers on the default port (`10125`).
 
-To use a config file:
+To use a config file and port:
 ```bash
-uvx --refresh ws-mcp@latest --config path/to/config --port 3001
+uvx --refresh ws-mcp@latest --config path/to/config --port 10125
 ```
 
 ## Detailed Usage

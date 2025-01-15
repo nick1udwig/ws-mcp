@@ -575,10 +575,10 @@ def parse_args():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  %(prog)s --command "uv tool run --from wcgw@latest --python 3.12 wcgw_mcp" --command "node path/to/mcp-server.js" --port 3000
-  %(prog)s --command "./server1" --command "./server2" --port 3001 --env API_KEY=xyz123
+  %(prog)s --command "uv tool run --from wcgw@latest --python 3.12 wcgw_mcp" --command "node path/to/mcp-server.js" --port 10125
+  %(prog)s --command "./server1" --command "./server2" --port 10125 --env API_KEY=xyz123
   %(prog)s --command "./server1" --command "./server2" --env-file .env
-  %(prog)s --config config.json --port 3000"""
+  %(prog)s --config config.json --port 10125"""
     )
 
     command_group = parser.add_mutually_exclusive_group(required=False)
@@ -598,7 +598,7 @@ Examples:
     parser.add_argument(
         '--port',
         type=int,
-        default=3000,
+        default=10125,
         help='Port for the WebSocket server (default: 3000)'
     )
 
