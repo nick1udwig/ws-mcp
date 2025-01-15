@@ -244,9 +244,9 @@ class McpWebSocketBridge:
         for server in self.servers:
             await server.start_process()
 
-    def get_server_for_tool(self, method: str) -> Optional[McpServer]:
+    def get_server_for_tool(self, name: str) -> Optional[McpServer]:
         """Get the server responsible for a given tool/method"""
-        return self.tool_to_server.get(method)
+        return self.tool_to_server.get(name)
 
     def get_combined_tools(self):
         combined_tools = []
@@ -340,10 +340,26 @@ class McpWebSocketBridge:
                     elif method == "notifications/initialized":
                         # handled in handle_initialize
                         continue
+                    elif method == "tools/call":
+                        # Route other requests to appropriate server
+                        name = data["params"]["name"]
+                        s = self.get_server_for_tool(name)
+                        if not s:
+                            error_response = {
+                                "jsonrpc": "2.0",
+                                "id": data.get("id"),
+                                "error": {
+                                    "code": -32601,
+                                    "message": f"Tool not found: {name}"
+                                }
+                            }
+                            await websocket.send(json.dumps(error_response))
+                            continue
 
-                    # Route other requests to appropriate server
-                    s = self.get_server_for_tool(method)
-                    if not s:
+                        response = await s.send_request(data, True)
+                        if response:
+                            await websocket.send(json.dumps(response))
+                    else:
                         error_response = {
                             "jsonrpc": "2.0",
                             "id": data.get("id"),
@@ -355,9 +371,6 @@ class McpWebSocketBridge:
                         await websocket.send(json.dumps(error_response))
                         continue
 
-                    response = await s.send_request(data, True)
-                    if response:
-                        await websocket.send(json.dumps(response))
 
                 except Exception as e:
                     logger.error(f"Error handling message: {e}")
