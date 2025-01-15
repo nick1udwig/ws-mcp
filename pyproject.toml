@@ -1,6 +1,6 @@
 [project]
 name = "ws-mcp"
-version = "0.1.6"
+version = "0.1.7"
 description = "Wrap MCP servers with a WebSocket."
 readme = "README.md"
 authors = [{ name = "nick1udwig", email = "hosted-fornet@protonmail.com" }]
@@ -8,6 +8,7 @@ requires-python = ">=3.12"
 dependencies = [
     "jsonschema>=4.23.0",
     "websockets>=14.1",
+    "colorama>=0.4.6",
 ]
 
 [project.urls]
