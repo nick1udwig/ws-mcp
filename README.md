@@ -11,11 +11,11 @@ For use with [kibitz](https://github.com/nick1udwig/kibitz).
 
 ```bash
 # Example using fetch
-uvx --from . ws-mcp --command "uvx mcp-server-fetch" --port 3002
+uvx ws-mcp --command "uvx mcp-server-fetch" --port 3002
 
 # Example using wcgw
 ## On macOS
-uvx --from . ws-mcp --command "uvx --from wcgw@latest --python 3.12 wcgw_mcp" --port 3001
+uvx ws-mcp --command "uvx --from wcgw@latest --python 3.12 wcgw_mcp" --port 3001
 
 ## On Linux (or if you have issues on macOS with wcgw)
 cd /tmp
