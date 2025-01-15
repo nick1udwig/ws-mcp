@@ -5,7 +5,7 @@
       "args": [
         "--refresh",
         "--from",
-        "wcgw@latest",
+        "wcgw-linux-compatible-fork@latest",
         "--python",
         "3.12",
         "wcgw_mcp"

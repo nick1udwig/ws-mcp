@@ -5,7 +5,17 @@ import logging
 import os
 import shlex
 import sys
+import time
+
+from asyncio import create_subprocess_exec, subprocess, Queue
+from pathlib import Path
+from typing import Optional, Dict, List, Any, Union, Tuple
+
+import jsonschema
+import websockets
+
 from colorama import Fore, Style, init as init_colorama
+from websockets.legacy.server import WebSocketServerProtocol
 
 # Initialize colorama for cross-platform color support
 init_colorama()
@@ -20,16 +30,28 @@ SERVER_NAME_COLOR = Fore.CYAN
 COMMAND_COLOR = Fore.WHITE
 RESET = Style.RESET_ALL
 
-import jsonschema
-import websockets
-from pathlib import Path
-
-from asyncio import create_subprocess_exec, subprocess, Queue
-from typing import Optional, Dict, List, Any, Union, Tuple
-
-from websockets.legacy.server import WebSocketServerProtocol
-
-import time
+DEFAULT_CONFIG = """{
+  "mcpServers": {
+    "wcgw": {
+      "command": "uvx",
+      "args": [
+        "--refresh",
+        "--from",
+        "wcgw-linux-compatible-fork@latest",
+        "--python",
+        "3.12",
+        "wcgw_mcp"
+      ]
+    },
+    "fetch": {
+      "command": "uvx",
+      "args": [
+        "--refresh",
+        "mcp-server-fetch"
+      ]
+    }
+  }
+}"""
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -438,7 +460,7 @@ class McpWebSocketBridge:
                 print(f"\n{SUMMARY_PREFIX} {server_count}/{server_count} MCP servers started successfully:")
                 for server in self.servers:
                     print(f"  {BULLET_POINT} {SERVER_NAME_COLOR}{server.name}{RESET}")
-                
+
                 print(f"\n{WEBSOCKET_PREFIX} Multi-MCP bridge running on ws://localhost:{self.port}\n")
 
                 try:
@@ -509,6 +531,21 @@ MCP_CONFIG_SCHEMA = {
     "additionalProperties": False
 }
 
+def parse_config(config_str: str) -> List[Tuple[str, str]]:
+    config = json.loads(config_str)
+
+    # Validate configuration against schema
+    jsonschema.validate(instance=config, schema=MCP_CONFIG_SCHEMA)
+
+    server_configs = []
+    for server_name, server_config in config["mcpServers"].items():
+        cmd = [server_config["command"]]
+        if "args" in server_config:
+            cmd.extend(server_config["args"])
+        server_configs.append((server_name, shlex.join(cmd)))
+
+    return server_configs
+
 def parse_config_file(config_path: Path) -> List[Tuple[str, str]]:
     """Parse the MCP server configuration file.
 
@@ -528,19 +565,9 @@ def parse_config_file(config_path: Path) -> List[Tuple[str, str]]:
         raise FileNotFoundError(f"Configuration file not found: {config_path}")
 
     with config_path.open() as f:
-        config = json.load(f)
+        config_str = f.read()
 
-    # Validate configuration against schema
-    jsonschema.validate(instance=config, schema=MCP_CONFIG_SCHEMA)
-
-    server_configs = []
-    for server_name, server_config in config["mcpServers"].items():
-        cmd = [server_config["command"]]
-        if "args" in server_config:
-            cmd.extend(server_config["args"])
-        server_configs.append((server_name, shlex.join(cmd)))
-
-    return server_configs
+    return parse_config(config_str)
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -554,7 +581,7 @@ Examples:
   %(prog)s --config config.json --port 3000"""
     )
 
-    command_group = parser.add_mutually_exclusive_group(required=True)
+    command_group = parser.add_mutually_exclusive_group(required=False)
     command_group.add_argument(
         '--command',
         type=str,
@@ -626,7 +653,12 @@ async def execute():
 
     # Get commands from either direct arguments or config file
     try:
-        commands = args.command if args.command else parse_config_file(args.config)
+        if args.command:
+            commands = args.command
+        elif args.config:
+            commands = parse_config_file(args.config)
+        else:
+            commands = parse_config(DEFAULT_CONFIG)
     except (FileNotFoundError, json.JSONDecodeError, jsonschema.exceptions.ValidationError) as e:
         logger.error(f"Error reading configuration file: {e}")
         sys.exit(1)
