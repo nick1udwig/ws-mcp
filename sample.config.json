@@ -1,0 +1,22 @@
+{
+  "mcpServers": {
+    "wcgw": {
+      "command": "uvx",
+      "args": [
+        "--refresh",
+        "--from",
+        "wcgw@latest",
+        "--python",
+        "3.12",
+        "wcgw_mcp"
+      ]
+    },
+    "fetch": {
+      "command": "uvx",
+      "args": [
+        "--refresh",
+        "mcp-server-fetch"
+      ]
+    }
+  }
+}
