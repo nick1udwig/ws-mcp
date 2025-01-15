@@ -3,11 +3,38 @@
 Wrap MCP stdio servers with a WebSocket.
 For use with [kibitz](https://github.com/nick1udwig/kibitz).
 
-## Prerequisites
+## Quickstart
 
-* [uv](https://github.com/astral-sh/uv)
+### Prerequisites
 
-## Usage
+1. Install [uv](https://github.com/astral-sh/uv):
+   ```bash
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   ```
+
+### Configuration
+
+1. Create your configuration file:
+   ```bash
+   cp sample.config.json config.json
+   ```
+
+2. The config file specifies which MCP servers to run. The sample config includes:
+   - `wcgw`: For general system operations and file management
+   - `fetch`: For making HTTP requests
+
+3. You can modify `config.json` to add or remove servers based on your needs.
+
+### Running ws-mcp
+
+Basic usage with config file:
+```bash
+uvx --refresh --from . ws-mcp --config config.json --port 3001
+```
+
+This will start all configured servers on the specified port.
+
+## Detailed Usage
 
 ```bash
 # Example using fetch
@@ -39,35 +66,4 @@ uvx ws-mcp --env-file path/to/.env --command "npx -y @modelcontextprotocol/serve
 
 # Servers can also be specified in a `.json` file following [the standard MCP format](https://modelcontextprotocol.io/quickstart/user#2-add-the-filesystem-mcp-server)
 uvx ws-mcp --env-file path/to/.env --config path/to/config.json --port 3005
-```
-
-### Example MCP configuration file
-
-```json
-{
-  "mcpServers": {
-    "wcgw": {
-      "command": "uvx",
-      "args": [
-        "wcgw@latest",
-        "--python",
-        "3.12",
-        "wcgw_mcp"
-      ]
-    },
-    "fetch": {
-      "command": "uvx",
-      "args": [
-        "mcp-server-fetch"
-      ]
-    },
-    "brave-search": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-brave-search"
-      ]
-    }
-  }
-}
 ```
