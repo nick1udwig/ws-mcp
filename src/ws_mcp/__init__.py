@@ -5,6 +5,20 @@ import logging
 import os
 import shlex
 import sys
+from colorama import Fore, Style, init as init_colorama
+
+# Initialize colorama for cross-platform color support
+init_colorama()
+
+# CLI formatting constants
+SUCCESS_PREFIX = "✅"
+START_PREFIX = "🚀"
+SUMMARY_PREFIX = "✨"
+WEBSOCKET_PREFIX = "🔗"
+BULLET_POINT = "•"
+SERVER_NAME_COLOR = Fore.CYAN
+COMMAND_COLOR = Fore.WHITE
+RESET = Style.RESET_ALL
 
 import jsonschema
 import websockets
@@ -93,7 +107,8 @@ INITIALIZE_REQUEST_SCHEMA = {
 
 class McpServer:
     """Represents a single MCP server process and its state."""
-    def __init__(self, command: str, env: Optional[Dict[str, str]] = None):
+    def __init__(self, name: str, command: str, env: Optional[Dict[str, str]] = None):
+        self.name = name
         self.command = command
         self.env = env or {}
         self.process: Optional[subprocess.Process] = None
@@ -118,7 +133,7 @@ class McpServer:
         if not self.process.stdin or not self.process.stdout:
             raise RuntimeError(f"Failed to create process pipes for command: {self.command}")
 
-        logger.info(f"Started MCP process: {self.command}")
+        print(f"{SUCCESS_PREFIX} Started MCP server '{SERVER_NAME_COLOR}{self.name}{RESET}' [command: {COMMAND_COLOR}{self.command}{RESET}]")
         return self.process
 
     def register_tools(self, tools: Dict[str, Any]):
@@ -232,8 +247,8 @@ class McpServer:
 
 
 class McpWebSocketBridge:
-    def __init__(self, commands: List[str], port: int = 3000, env: Optional[Dict[str, str]] = None):
-        self.servers: List[McpServer] = [McpServer(cmd, env) for cmd in commands]
+    def __init__(self, servers: List[Tuple[str, str]], port: int = 3000, env: Optional[Dict[str, str]] = None):
+        self.servers: List[McpServer] = [McpServer(name, cmd, env) for name, cmd in servers]
         self.port = port
         self.websocket: Optional[WebSocketServerProtocol] = None
         self.tool_to_server: Dict[str, McpServer] = {}  # Maps tool names to servers
@@ -399,6 +414,7 @@ class McpWebSocketBridge:
     async def serve(self):
         """Start the WebSocket server and all MCP processes"""
         try:
+            print(f"\n{START_PREFIX} Starting {len(self.servers)} MCP servers...")
             # Start all MCP servers
             await self.start_all_servers()
 
@@ -417,7 +433,13 @@ class McpWebSocketBridge:
 
             # Start WebSocket server
             async with websockets.serve(self.handle_client, "localhost", self.port):
-                logger.info(f"Multi-MCP bridge running on ws://localhost:{self.port}")
+                # Print summary of started servers
+                server_count = len(self.servers)
+                print(f"\n{SUMMARY_PREFIX} {server_count}/{server_count} MCP servers started successfully:")
+                for server in self.servers:
+                    print(f"  {BULLET_POINT} {SERVER_NAME_COLOR}{server.name}{RESET}")
+                
+                print(f"\n{WEBSOCKET_PREFIX} Multi-MCP bridge running on ws://localhost:{self.port}\n")
 
                 try:
                     #await asyncio.gather(*output_tasks, stderr_task)
@@ -487,7 +509,7 @@ MCP_CONFIG_SCHEMA = {
     "additionalProperties": False
 }
 
-def parse_config_file(config_path: Path) -> List[str]:
+def parse_config_file(config_path: Path) -> List[Tuple[str, str]]:
     """Parse the MCP server configuration file.
 
     Args:
@@ -511,14 +533,14 @@ def parse_config_file(config_path: Path) -> List[str]:
     # Validate configuration against schema
     jsonschema.validate(instance=config, schema=MCP_CONFIG_SCHEMA)
 
-    commands = []
+    server_configs = []
     for server_name, server_config in config["mcpServers"].items():
         cmd = [server_config["command"]]
         if "args" in server_config:
             cmd.extend(server_config["args"])
-        commands.append(shlex.join(cmd))
+        server_configs.append((server_name, shlex.join(cmd)))
 
-    return commands
+    return server_configs
 
 def parse_args():
     parser = argparse.ArgumentParser(
