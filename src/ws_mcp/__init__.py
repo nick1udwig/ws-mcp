@@ -54,7 +54,11 @@ DEFAULT_CONFIG = """{
 }"""
 
 logging.basicConfig(level=logging.INFO)
+# Silence all websockets loggers at the root
+logging.getLogger('websockets').setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
+websockets_logger = logging.getLogger('websockets.server')
+websockets_logger.setLevel(logging.WARNING)  # Reduce websockets library logging
 
 class MessagePublisher:
     """Handles publishing messages to WebSocket clients."""
@@ -333,6 +337,8 @@ class McpWebSocketBridge:
 
     async def handle_client(self, websocket: WebSocketServerProtocol):
         """Handle WebSocket client connection"""
+        # Check if this is actually a new connection
+        was_connected = self.websocket is not None
         self.websocket = websocket
         self.message_publisher.set_websocket(websocket)
 
@@ -340,7 +346,8 @@ class McpWebSocketBridge:
         for server in self.servers:
             server.set_message_publisher(self.message_publisher)
 
-        logger.info("WebSocket client connected")
+        if not was_connected:  # Only log if we weren't connected before
+            logger.info("WebSocket status: connected")
 
         try:
             async for message in websocket:
@@ -423,9 +430,13 @@ class McpWebSocketBridge:
                         await websocket.send(json.dumps(error_response))
 
         except websockets.exceptions.ConnectionClosed:
-            logger.info("WebSocket client disconnected")
+            # Only log if this was our last connection
+            if self.websocket == websocket:
+                logger.info("WebSocket status: disconnected")
+                self.websocket = None
         finally:
-            self.websocket = None
+            if self.websocket == websocket:  # Only clear if it's still our current connection
+                self.websocket = None
 
     async def cleanup(self):
         """Clean up all server resources"""
