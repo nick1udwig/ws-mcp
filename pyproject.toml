@@ -1,6 +1,6 @@
 [project]
 name = "ws-mcp"
-version = "0.1.9"
+version = "0.1.10"
 description = "Wrap MCP servers with a WebSocket."
 readme = "README.md"
 authors = [{ name = "nick1udwig", email = "hosted-fornet@protonmail.com" }]
