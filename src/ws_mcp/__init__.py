@@ -37,7 +37,7 @@ DEFAULT_CONFIG = """{
       "args": [
         "--refresh",
         "--from",
-        "wcgw-linux-compatible-fork@latest",
+        "wcgw@latest",
         "--python",
         "3.12",
         "wcgw_mcp"
