@@ -75,3 +75,9 @@ uvx --refresh ws-mcp --env-file path/to/.env --command "npx -y @modelcontextprot
 # Servers can also be specified in a `.json` file following [the standard MCP format](https://modelcontextprotocol.io/quickstart/user#2-add-the-filesystem-mcp-server)
 uvx --refresh ws-mcp --env-file path/to/.env --config path/to/config.json --port 3005
 ```
+
+## Dev setup
+
+```bash
+uv run ws-mcp --env-file path/to/.env --config path/to/config.json --port 3005
+```

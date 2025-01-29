@@ -274,6 +274,8 @@ class McpServer:
 
 class McpWebSocketBridge:
     def __init__(self, servers: List[Tuple[str, str]], port: int = 3000, env: Optional[Dict[str, str]] = None):
+        print("WS Bridge: init")
+        print(servers)
         self.servers: List[McpServer] = [McpServer(name, cmd, env) for name, cmd in servers]
         self.port = port
         self.websocket: Optional[WebSocketServerProtocol] = None
@@ -281,24 +283,29 @@ class McpWebSocketBridge:
         self.message_publisher = MessagePublisher()
 
     async def start_all_servers(self):
+        print("WS Bridge: start_all_servers")
         """Start all MCP server processes"""
         for server in self.servers:
             await server.start_process()
 
     def get_server_for_tool(self, name: str) -> Optional[McpServer]:
+        print(f"WS Bridge: get_server_for_tool: {name}")
         """Get the server responsible for a given tool/method"""
         return self.tool_to_server.get(name)
 
     def get_combined_tools(self):
+        print("WS Bridge: get_combined_tools")
         combined_tools = []
         for server in self.servers:
             logger.debug(f"{server.tools}")
             combined_tools.extend(server.tools)
+            # print(f"combined_tools: {combined_tools}")
         logger.debug(f"get_combined_tools: combined: {combined_tools}")
         return combined_tools
 
     async def handle_initialize(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Handle initialize request by forwarding to all servers and combining responses"""
+        print("WS Bridge: handle_initialize")
         # Send initialize to all servers and collect their tools
         for server in self.servers:
             response = await server.send_request(request, False)
@@ -311,6 +318,7 @@ class McpWebSocketBridge:
 
             if "result" in response and "tools" in response["result"]:
                 server_tools = response["result"]["tools"]
+                print(server_tools)
                 # Register tools with this server
                 server.register_tools(server_tools)
                 # Update tool to server mapping
@@ -336,6 +344,7 @@ class McpWebSocketBridge:
         }
 
     async def handle_client(self, websocket: WebSocketServerProtocol):
+        print("WS Bridge: handle_client")
         """Handle WebSocket client connection"""
         # Check if this is actually a new connection
         was_connected = self.websocket is not None
@@ -439,6 +448,7 @@ class McpWebSocketBridge:
                 self.websocket = None
 
     async def cleanup(self):
+        print("WS Bridge: cleanup")
         """Clean up all server resources"""
         await self.message_publisher.stop()
         for server in self.servers:
@@ -447,7 +457,8 @@ class McpWebSocketBridge:
     async def serve(self):
         """Start the WebSocket server and all MCP processes"""
         try:
-            print(f"\n{START_PREFIX} Starting {len(self.servers)} MCP servers...")
+            # print(f"\n{START_PREFIX} Starting {len(self.servers)} MCP servers...")
+            # print(f"\n{START_PREFIX} Starting {len(self.servers)} MCP servers...")
             # Start all MCP servers
             await self.start_all_servers()
 
@@ -554,7 +565,7 @@ def parse_config(config_str: str) -> List[Tuple[str, str]]:
         if "args" in server_config:
             cmd.extend(server_config["args"])
         server_configs.append((server_name, shlex.join(cmd)))
-
+    print(server_configs)
     return server_configs
 
 def parse_config_file(config_path: Path) -> List[Tuple[str, str]]:
@@ -674,6 +685,7 @@ async def execute():
         logger.error(f"Error reading configuration file: {e}")
         sys.exit(1)
 
+    print("commands: ", commands)
     # Initialize bridge with multiple commands
     bridge = McpWebSocketBridge(commands, args.port, env)
     await bridge.serve()
