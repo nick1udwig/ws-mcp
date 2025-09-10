@@ -431,18 +431,14 @@ class McpWebSocketBridge:
                         await websocket.send(json.dumps(tools))
                         continue
                     elif method == "notifications/initialized":
-                        # handled in handle_initialize
                         continue
                     elif method == "spider/start-package":
-                        # Handle Spider start_package method
                         await self.handle_spider_start_package(data, websocket)
                         continue
                     elif method == "spider/persist":
-                        # Handle Spider persist method
                         await self.handle_spider_persist(data, websocket)
                         continue
                     elif method == "spider/load-project":
-                        # Handle Spider load_project method
                         await self.handle_spider_load_project(data, websocket)
                         continue
                     elif method == "tools/call":
