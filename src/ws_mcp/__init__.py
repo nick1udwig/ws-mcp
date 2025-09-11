@@ -501,6 +501,7 @@ class McpWebSocketBridge:
         import base64
         import tempfile
         import shutil
+        import hashlib
         from pathlib import Path
 
         try:
@@ -521,6 +522,7 @@ class McpWebSocketBridge:
 
             package_path = Path(package_dir)
             pkg_path = package_path / "pkg"
+            metadata_path = package_path / "metadata.json"
 
             if not pkg_path.exists():
                 error_response = {
@@ -533,6 +535,25 @@ class McpWebSocketBridge:
                 }
                 await websocket.send(json.dumps(error_response))
                 return
+
+            # Read metadata.json if it exists
+            metadata = {}
+            package_name = package_path.name
+            publisher = "unknown"
+            current_version = "1.0.0"
+
+            if metadata_path.exists():
+                try:
+                    with open(metadata_path, 'r') as f:
+                        metadata = json.load(f)
+                        # Extract key fields from metadata
+                        if 'properties' in metadata:
+                            props = metadata['properties']
+                            package_name = props.get('package_name', package_name)
+                            publisher = props.get('publisher', publisher)
+                            current_version = props.get('current_version', current_version)
+                except Exception as e:
+                    logger.warning(f"Failed to read metadata.json: {e}")
 
             # Create a temporary zip file
             with tempfile.NamedTemporaryFile(suffix='.zip', delete=False) as tmp_zip:
@@ -548,16 +569,76 @@ class McpWebSocketBridge:
                     zip_data = f.read()
                     zip_base64 = base64.b64encode(zip_data).decode('utf-8')
 
+                    # Calculate hash of the zip file
+                    f.seek(0)
+                    hash_obj = hashlib.sha256()
+                    hash_obj.update(f.read())
+                    version_hash = hash_obj.hexdigest()
+
                 # Clean up temp file
                 os.unlink(tmp_zip.name)
 
-            # Send response with the zipped package
+            # Ensure metadata has all required fields
+            if metadata:
+                # Ensure properties exists
+                if 'properties' not in metadata:
+                    metadata['properties'] = {}
+
+                # Ensure all required properties fields are present
+                props = metadata['properties']
+                props['package_name'] = props.get('package_name', package_name)
+                props['publisher'] = props.get('publisher', publisher)
+                props['current_version'] = props.get('current_version', current_version)
+
+                # Ensure code_hashes includes the current version
+                if 'code_hashes' not in props:
+                    props['code_hashes'] = {}
+                props['code_hashes'][current_version] = version_hash
+
+                # Ensure other fields have defaults if not present
+                props.setdefault('mirrors', [])
+                props.setdefault('license', None)
+                props.setdefault('screenshots', None)
+                props.setdefault('wit_version', None)
+                props.setdefault('dependencies', None)
+
+                # Ensure top-level metadata fields
+                metadata.setdefault('name', package_name)
+                metadata.setdefault('description', props.get('description', f"Package built from {package_dir}"))
+                metadata.setdefault('image', '')
+                metadata.setdefault('external_url', '')
+                metadata.setdefault('animation_url', None)
+            else:
+                # Create complete metadata structure from scratch
+                metadata = {
+                    "name": package_name,
+                    "description": f"Package built from {package_dir}",
+                    "image": "",
+                    "external_url": "",
+                    "animation_url": None,
+                    "properties": {
+                        "package_name": package_name,
+                        "publisher": publisher,
+                        "current_version": current_version,
+                        "mirrors": [],
+                        "code_hashes": {current_version: version_hash},
+                        "license": None,
+                        "screenshots": None,
+                        "wit_version": None,
+                        "dependencies": None
+                    }
+                }
+
+            # Send response with the zipped package and metadata
             response = {
                 "jsonrpc": "2.0",
                 "id": data.get("id"),
                 "result": {
                     "package_zip": zip_base64,
-                    "package_name": package_path.name,
+                    "package_name": package_name,
+                    "publisher": publisher,
+                    "version_hash": version_hash,
+                    "metadata": metadata,
                     "success": True
                 }
             }
