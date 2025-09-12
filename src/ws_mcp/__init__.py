@@ -559,6 +559,16 @@ class McpWebSocketBridge:
             with tempfile.NamedTemporaryFile(suffix='.zip', delete=False) as tmp_zip:
                 with zipfile.ZipFile(tmp_zip.name, 'w', zipfile.ZIP_DEFLATED) as zipf:
                     for root, dirs, files in os.walk(pkg_path):
+                        # Add directory entries
+                        for dir_name in dirs:
+                            dir_path = os.path.join(root, dir_name)
+                            arcname = os.path.relpath(dir_path, pkg_path) + '/'
+                            # Create a ZipInfo for the directory
+                            zinfo = zipfile.ZipInfo(arcname)
+                            zinfo.external_attr = 0o755 << 16 | 0x10  # Set directory flag and permissions
+                            zipf.writestr(zinfo, '')
+                        
+                        # Add file entries
                         for file in files:
                             file_path = os.path.join(root, file)
                             arcname = os.path.relpath(file_path, pkg_path)
