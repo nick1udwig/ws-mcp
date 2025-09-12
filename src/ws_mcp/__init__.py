@@ -561,7 +561,7 @@ class McpWebSocketBridge:
                     for root, dirs, files in os.walk(pkg_path):
                         for file in files:
                             file_path = os.path.join(root, file)
-                            arcname = os.path.relpath(file_path, pkg_path.parent)
+                            arcname = os.path.relpath(file_path, pkg_path)
                             zipf.write(file_path, arcname)
 
                 # Read the zip file and encode as base64
