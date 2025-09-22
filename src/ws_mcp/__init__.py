@@ -273,12 +273,15 @@ class McpServer:
 
 
 class McpWebSocketBridge:
-    def __init__(self, servers: List[Tuple[str, str]], port: int = 3000, env: Optional[Dict[str, str]] = None):
+    def __init__(self, servers: List[Tuple[str, str]], port: int = 3000, env: Optional[Dict[str, str]] = None, expose_to_network: bool = False):
         self.servers: List[McpServer] = [McpServer(name, cmd, env) for name, cmd in servers]
         self.port = port
+        self.expose_to_network = expose_to_network
         self.websocket: Optional[WebSocketServerProtocol] = None
         self.tool_to_server: Dict[str, McpServer] = {}  # Maps tool names to servers
         self.message_publisher = MessagePublisher()
+        self.authenticated = False  # Track Spider authentication
+        self.expected_api_key: Optional[str] = None  # Expected API key for Spider auth
 
     async def start_all_servers(self):
         """Start all MCP server processes"""
@@ -342,6 +345,13 @@ class McpWebSocketBridge:
         self.websocket = websocket
         self.message_publisher.set_websocket(websocket)
 
+        # Check if Spider authentication is required
+        self.expected_api_key = os.environ.get('SPIDER_API_KEY')
+        if self.expected_api_key:
+            self.authenticated = False
+        else:
+            self.authenticated = True  # No auth required if no API key set
+
         # Set message publisher for all servers
         for server in self.servers:
             server.set_message_publisher(self.message_publisher)
@@ -356,6 +366,46 @@ class McpWebSocketBridge:
                     logger.debug(f"Received message: {data}")
 
                     method = data.get("method")
+
+                    # Handle Spider authentication first if required
+                    if not self.authenticated and self.expected_api_key:
+                        if method != "spider/authorization":
+                            error_response = {
+                                "jsonrpc": "2.0",
+                                "id": data.get("id"),
+                                "error": {
+                                    "code": -32001,
+                                    "message": "Authentication required. Send spider/authorization first."
+                                }
+                            }
+                            await websocket.send(json.dumps(error_response))
+                            await websocket.close(1008, "Authentication required")
+                            return
+                        else:
+                            # Handle spider/authorization
+                            params = data.get("params", {})
+                            api_key = params.get("api_key")
+                            if api_key == self.expected_api_key:
+                                self.authenticated = True
+                                auth_response = {
+                                    "jsonrpc": "2.0",
+                                    "id": data.get("id"),
+                                    "result": {"status": "authenticated"}
+                                }
+                                await websocket.send(json.dumps(auth_response))
+                                continue
+                            else:
+                                error_response = {
+                                    "jsonrpc": "2.0",
+                                    "id": data.get("id"),
+                                    "error": {
+                                        "code": -32002,
+                                        "message": "Invalid API key"
+                                    }
+                                }
+                                await websocket.send(json.dumps(error_response))
+                                await websocket.close(1008, "Invalid API key")
+                                return
 
                     # Special handling for initialize
                     if method == "initialize":
@@ -382,7 +432,15 @@ class McpWebSocketBridge:
                         await websocket.send(json.dumps(tools))
                         continue
                     elif method == "notifications/initialized":
-                        # handled in handle_initialize
+                        continue
+                    elif method == "spider/start-package":
+                        await self.handle_spider_start_package(data, websocket)
+                        continue
+                    elif method == "spider/persist":
+                        await self.handle_spider_persist(data, websocket)
+                        continue
+                    elif method == "spider/load-project":
+                        await self.handle_spider_load_project(data, websocket)
                         continue
                     elif method == "tools/call":
                         # Route other requests to appropriate server
@@ -438,6 +496,312 @@ class McpWebSocketBridge:
             if self.websocket == websocket:  # Only clear if it's still our current connection
                 self.websocket = None
 
+    async def handle_spider_start_package(self, data: Dict[str, Any], websocket: WebSocketServerProtocol):
+        """Handle Spider start-package request"""
+        import zipfile
+        import base64
+        import tempfile
+        import shutil
+        import hashlib
+        from pathlib import Path
+
+        try:
+            params = data.get("params", {})
+            package_dir = params.get("package_dir")
+
+            if not package_dir:
+                error_response = {
+                    "jsonrpc": "2.0",
+                    "id": data.get("id"),
+                    "error": {
+                        "code": -32602,
+                        "message": "Missing package_dir parameter"
+                    }
+                }
+                await websocket.send(json.dumps(error_response))
+                return
+
+            package_path = Path(package_dir)
+            pkg_path = package_path / "pkg"
+            metadata_path = package_path / "metadata.json"
+
+            if not pkg_path.exists():
+                error_response = {
+                    "jsonrpc": "2.0",
+                    "id": data.get("id"),
+                    "error": {
+                        "code": -32603,
+                        "message": f"Package not built: {pkg_path} does not exist. Run 'kit build' first."
+                    }
+                }
+                await websocket.send(json.dumps(error_response))
+                return
+
+            # Read metadata.json if it exists
+            metadata = {}
+            package_name = package_path.name
+            publisher = "unknown"
+            current_version = "1.0.0"
+
+            if metadata_path.exists():
+                try:
+                    with open(metadata_path, 'r') as f:
+                        metadata = json.load(f)
+                        # Extract key fields from metadata
+                        if 'properties' in metadata:
+                            props = metadata['properties']
+                            package_name = props.get('package_name', package_name)
+                            publisher = props.get('publisher', publisher)
+                            current_version = props.get('current_version', current_version)
+                except Exception as e:
+                    logger.warning(f"Failed to read metadata.json: {e}")
+
+            # Create a temporary zip file
+            with tempfile.NamedTemporaryFile(suffix='.zip', delete=False) as tmp_zip:
+                with zipfile.ZipFile(tmp_zip.name, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                    for root, dirs, files in os.walk(pkg_path):
+                        # Add directory entries
+                        for dir_name in dirs:
+                            dir_path = os.path.join(root, dir_name)
+                            arcname = os.path.relpath(dir_path, pkg_path) + '/'
+                            # Create a ZipInfo for the directory
+                            zinfo = zipfile.ZipInfo(arcname)
+                            zinfo.external_attr = 0o755 << 16 | 0x10  # Set directory flag and permissions
+                            zipf.writestr(zinfo, '')
+
+                        # Add file entries
+                        for file in files:
+                            file_path = os.path.join(root, file)
+                            arcname = os.path.relpath(file_path, pkg_path)
+                            zipf.write(file_path, arcname)
+
+                # Read the zip file and encode as base64
+                with open(tmp_zip.name, 'rb') as f:
+                    zip_data = f.read()
+                    zip_base64 = base64.b64encode(zip_data).decode('utf-8')
+
+                    # Calculate hash of the zip file
+                    f.seek(0)
+                    hash_obj = hashlib.sha256()
+                    hash_obj.update(f.read())
+                    version_hash = hash_obj.hexdigest()
+
+                # Clean up temp file
+                os.unlink(tmp_zip.name)
+
+            # Ensure metadata has all required fields
+            if metadata:
+                # Ensure properties exists
+                if 'properties' not in metadata:
+                    metadata['properties'] = {}
+
+                # Ensure all required properties fields are present
+                props = metadata['properties']
+                props['package_name'] = props.get('package_name', package_name)
+                props['publisher'] = props.get('publisher', publisher)
+                props['current_version'] = props.get('current_version', current_version)
+
+                # Ensure code_hashes includes the current version
+                if 'code_hashes' not in props:
+                    props['code_hashes'] = {}
+                props['code_hashes'][current_version] = version_hash
+
+                # Ensure other fields have defaults if not present
+                props.setdefault('mirrors', [])
+                props.setdefault('license', None)
+                props.setdefault('screenshots', None)
+                props.setdefault('wit_version', None)
+                props.setdefault('dependencies', None)
+
+                # Ensure top-level metadata fields
+                metadata.setdefault('name', package_name)
+                metadata.setdefault('description', props.get('description', f"Package built from {package_dir}"))
+                metadata.setdefault('image', '')
+                metadata.setdefault('external_url', '')
+                metadata.setdefault('animation_url', None)
+            else:
+                # Create complete metadata structure from scratch
+                metadata = {
+                    "name": package_name,
+                    "description": f"Package built from {package_dir}",
+                    "image": "",
+                    "external_url": "",
+                    "animation_url": None,
+                    "properties": {
+                        "package_name": package_name,
+                        "publisher": publisher,
+                        "current_version": current_version,
+                        "mirrors": [],
+                        "code_hashes": {current_version: version_hash},
+                        "license": None,
+                        "screenshots": None,
+                        "wit_version": None,
+                        "dependencies": None
+                    }
+                }
+
+            # Send response with the zipped package and metadata
+            response = {
+                "jsonrpc": "2.0",
+                "id": data.get("id"),
+                "result": {
+                    "package_zip": zip_base64,
+                    "package_name": package_name,
+                    "publisher": publisher,
+                    "version_hash": version_hash,
+                    "metadata": metadata,
+                    "success": True
+                }
+            }
+            await websocket.send(json.dumps(response))
+
+        except Exception as e:
+            error_response = {
+                "jsonrpc": "2.0",
+                "id": data.get("id"),
+                "error": {
+                    "code": -32603,
+                    "message": f"Failed to package: {str(e)}"
+                }
+            }
+            await websocket.send(json.dumps(error_response))
+
+    async def handle_spider_persist(self, data: Dict[str, Any], websocket: WebSocketServerProtocol):
+        """Handle Spider persist request"""
+        import zipfile
+        import base64
+        import tempfile
+        from pathlib import Path
+
+        try:
+            params = data.get("params", {})
+            directories = params.get("directories", [])
+
+            if not directories:
+                error_response = {
+                    "jsonrpc": "2.0",
+                    "id": data.get("id"),
+                    "error": {
+                        "code": -32602,
+                        "message": "Missing directories parameter"
+                    }
+                }
+                await websocket.send(json.dumps(error_response))
+                return
+
+            # Create a temporary zip file
+            with tempfile.NamedTemporaryFile(suffix='.zip', delete=False) as tmp_zip:
+                with zipfile.ZipFile(tmp_zip.name, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                    for directory in directories:
+                        dir_path = Path(directory).expanduser()
+                        if dir_path.exists() and dir_path.is_dir():
+                            for root, dirs, files in os.walk(dir_path):
+                                for file in files:
+                                    file_path = os.path.join(root, file)
+                                    # Preserve directory structure in zip
+                                    arcname = os.path.relpath(file_path, dir_path.parent)
+                                    zipf.write(file_path, arcname)
+
+                # Read the zip file and encode as base64
+                with open(tmp_zip.name, 'rb') as f:
+                    zip_data = f.read()
+                    zip_base64 = base64.b64encode(zip_data).decode('utf-8')
+
+                # Clean up temp file
+                os.unlink(tmp_zip.name)
+
+            # Send response with the zipped directories
+            response = {
+                "jsonrpc": "2.0",
+                "id": data.get("id"),
+                "result": {
+                    "persisted_zip": zip_base64,
+                    "directories": directories,
+                    "success": True
+                }
+            }
+            await websocket.send(json.dumps(response))
+
+        except Exception as e:
+            error_response = {
+                "jsonrpc": "2.0",
+                "id": data.get("id"),
+                "error": {
+                    "code": -32603,
+                    "message": f"Failed to persist: {str(e)}"
+                }
+            }
+            await websocket.send(json.dumps(error_response))
+
+    async def handle_spider_load_project(self, data: Dict[str, Any], websocket: WebSocketServerProtocol):
+        """Handle Spider load-project request"""
+        import zipfile
+        import base64
+        import tempfile
+        from pathlib import Path
+        import uuid
+
+        try:
+            params = data.get("params", {})
+            project_uuid = params.get("project_uuid")
+            name = params.get("name")
+            initial_zip = params.get("initial_zip")
+
+            # Generate UUID if not provided
+            if not project_uuid:
+                project_uuid = str(uuid.uuid4())
+
+            # Create project directory
+            project_dir = Path.home() / project_uuid
+            project_dir.mkdir(parents=True, exist_ok=True)
+
+            # Extract initial zip if provided
+            if initial_zip:
+                try:
+                    # Decode base64 zip content
+                    zip_data = base64.b64decode(initial_zip)
+
+                    # Create temporary file for zip
+                    with tempfile.NamedTemporaryFile(suffix='.zip', delete=False) as tmp_zip:
+                        tmp_zip.write(zip_data)
+                        tmp_zip_path = tmp_zip.name
+
+                    # Extract zip to project directory
+                    with zipfile.ZipFile(tmp_zip_path, 'r') as zipf:
+                        zipf.extractall(project_dir)
+
+                    # Clean up temp file
+                    os.unlink(tmp_zip_path)
+
+                    logger.info(f"Extracted initial zip to {project_dir}")
+                except Exception as e:
+                    logger.error(f"Failed to extract initial zip: {e}")
+                    # Continue even if extraction fails
+
+            # Send successful response
+            response = {
+                "jsonrpc": "2.0",
+                "id": data.get("id"),
+                "result": {
+                    "project_uuid": project_uuid,
+                    "directory": str(project_dir)
+                }
+            }
+            await websocket.send(json.dumps(response))
+            logger.info(f"Project loaded: {project_uuid} at {project_dir}")
+
+        except Exception as e:
+            logger.error(f"Error in handle_spider_load_project: {e}")
+            error_response = {
+                "jsonrpc": "2.0",
+                "id": data.get("id"),
+                "error": {
+                    "code": -32603,
+                    "message": f"Failed to load project: {str(e)}"
+                }
+            }
+            await websocket.send(json.dumps(error_response))
+
     async def cleanup(self):
         """Clean up all server resources"""
         await self.message_publisher.stop()
@@ -465,14 +829,16 @@ class McpWebSocketBridge:
             ]
 
             # Start WebSocket server
-            async with websockets.serve(self.handle_client, "localhost", self.port):
+            host = "0.0.0.0" if self.expose_to_network else "localhost"
+            async with websockets.serve(self.handle_client, host, self.port):
                 # Print summary of started servers
                 server_count = len(self.servers)
                 print(f"\n{SUMMARY_PREFIX} {server_count}/{server_count} MCP servers started successfully:")
                 for server in self.servers:
                     print(f"  {BULLET_POINT} {SERVER_NAME_COLOR}{server.name}{RESET}")
 
-                print(f"\n{WEBSOCKET_PREFIX} Multi-MCP bridge running on ws://localhost:{self.port}\n")
+                # Display appropriate URL based on host setting
+                print(f"\n{WEBSOCKET_PREFIX} Multi-MCP bridge running on ws://{host}:{self.port}\n")
 
                 try:
                     #await asyncio.gather(*output_tasks, stderr_task)
@@ -633,6 +999,12 @@ Examples:
         help='Path to a .env file containing environment variables'
     )
 
+    parser.add_argument(
+        '--expose-to-network',
+        action='store_true',
+        help='Expose the server to the network by listening on 0.0.0.0 instead of localhost'
+    )
+
     return parser.parse_args()
 
 async def execute():
@@ -675,7 +1047,7 @@ async def execute():
         sys.exit(1)
 
     # Initialize bridge with multiple commands
-    bridge = McpWebSocketBridge(commands, args.port, env)
+    bridge = McpWebSocketBridge(commands, args.port, env, args.expose_to_network)
     await bridge.serve()
 
 def main():
