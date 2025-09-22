@@ -273,9 +273,10 @@ class McpServer:
 
 
 class McpWebSocketBridge:
-    def __init__(self, servers: List[Tuple[str, str]], port: int = 3000, env: Optional[Dict[str, str]] = None):
+    def __init__(self, servers: List[Tuple[str, str]], port: int = 3000, env: Optional[Dict[str, str]] = None, expose_to_network: bool = False):
         self.servers: List[McpServer] = [McpServer(name, cmd, env) for name, cmd in servers]
         self.port = port
+        self.expose_to_network = expose_to_network
         self.websocket: Optional[WebSocketServerProtocol] = None
         self.tool_to_server: Dict[str, McpServer] = {}  # Maps tool names to servers
         self.message_publisher = MessagePublisher()
@@ -567,7 +568,7 @@ class McpWebSocketBridge:
                             zinfo = zipfile.ZipInfo(arcname)
                             zinfo.external_attr = 0o755 << 16 | 0x10  # Set directory flag and permissions
                             zipf.writestr(zinfo, '')
-                        
+
                         # Add file entries
                         for file in files:
                             file_path = os.path.join(root, file)
@@ -828,14 +829,16 @@ class McpWebSocketBridge:
             ]
 
             # Start WebSocket server
-            async with websockets.serve(self.handle_client, "localhost", self.port):
+            host = "0.0.0.0" if self.expose_to_network else "localhost"
+            async with websockets.serve(self.handle_client, host, self.port):
                 # Print summary of started servers
                 server_count = len(self.servers)
                 print(f"\n{SUMMARY_PREFIX} {server_count}/{server_count} MCP servers started successfully:")
                 for server in self.servers:
                     print(f"  {BULLET_POINT} {SERVER_NAME_COLOR}{server.name}{RESET}")
 
-                print(f"\n{WEBSOCKET_PREFIX} Multi-MCP bridge running on ws://localhost:{self.port}\n")
+                # Display appropriate URL based on host setting
+                print(f"\n{WEBSOCKET_PREFIX} Multi-MCP bridge running on ws://{host}:{self.port}\n")
 
                 try:
                     #await asyncio.gather(*output_tasks, stderr_task)
@@ -996,6 +999,12 @@ Examples:
         help='Path to a .env file containing environment variables'
     )
 
+    parser.add_argument(
+        '--expose-to-network',
+        action='store_true',
+        help='Expose the server to the network by listening on 0.0.0.0 instead of localhost'
+    )
+
     return parser.parse_args()
 
 async def execute():
@@ -1038,7 +1047,7 @@ async def execute():
         sys.exit(1)
 
     # Initialize bridge with multiple commands
-    bridge = McpWebSocketBridge(commands, args.port, env)
+    bridge = McpWebSocketBridge(commands, args.port, env, args.expose_to_network)
     await bridge.serve()
 
 def main():
